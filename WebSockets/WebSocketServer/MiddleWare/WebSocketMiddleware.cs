@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace WebSocketServer.MiddleWare
@@ -26,7 +27,9 @@ namespace WebSocketServer.MiddleWare
                     await ReceiveMessage(webSocket, async(result, buffer)=>{
                         if (result.MessageType==WebSocketMessageType.Text){
                             Console.WriteLine("Message received");
-                            Console.WriteLine($"Messsage:{Encoding.UTF8.GetString(buffer,0,result.Count)}");
+                            var message=Encoding.UTF8.GetString(buffer,0,result.Count);
+                            Console.WriteLine($"Messsage:{message}");
+                            await RouteJSONMessageAsync(message);
                         }else if (result.MessageType==WebSocketMessageType.Close){
                             Console.WriteLine("Receive Close message");
                             return;
@@ -57,5 +60,38 @@ namespace WebSocketServer.MiddleWare
             var buffer= Encoding.UTF8.GetBytes("ConnID: "+ConnId);
             await socket.SendAsync(buffer, WebSocketMessageType.Text, true, CancellationToken.None);
         }
+
+        public async Task RouteJSONMessageAsync(string message){
+            var routeOb= JsonSerializer.Deserialize<MessageTDO> (message);
+            if (Guid.TryParse(routeOb.To, out Guid result)){
+                Console.WriteLine(result);
+                var socket=_manager.GetAllSockets().FirstOrDefault(s=>s.Key==routeOb.To);
+                if (socket.Value!=null){
+                    if (socket.Value.State==WebSocketState.Open){
+                        await socket.Value.SendAsync(Encoding.UTF8.GetBytes(routeOb.Message),
+                        WebSocketMessageType.Text, true, CancellationToken.None);
+                    }
+                }else{
+                    Console.WriteLine("Invalid recipient");
+                }
+            }else{
+                Console.WriteLine("BrodCast");
+                foreach( var socket in _manager.GetAllSockets()){
+                    if (socket.Value.State==WebSocketState.Open){
+                        await socket.Value.SendAsync(Encoding.UTF8.GetBytes(routeOb.Message),
+                        WebSocketMessageType.Text, true, CancellationToken.None);
+                    }
+                }
+            }
+            
+        }
+
+        
+    }
+
+    public class MessageTDO{
+        public string From {get;set;}
+        public string To { get; set; }
+        public string Message { get; set; }
     }
 }
